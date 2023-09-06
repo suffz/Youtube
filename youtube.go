@@ -273,21 +273,15 @@ func (YT YTRequest) Play(inp, out string, body []byte) {
 		if err != nil {
 			panic(err)
 		}
-		go func() {
-			speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
-			done := make(chan bool)
-			speaker.Play(beep.Seq(streamer, beep.Callback(func() {
-				done <- true
-			})))
+		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+		done := make(chan bool)
+		speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+			done <- true
+		})))
 
-			<-done
-			speaker.Clear()
-			speaker.Close()
-		}()
-
-		for i := 0; i < YT.Config.MS-10000; i = i + 1000 {
-			time.Sleep(time.Second)
-		}
+		<-done
+		speaker.Clear()
+		speaker.Close()
 	}
 }
 
