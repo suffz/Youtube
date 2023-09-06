@@ -271,7 +271,7 @@ func (YT YTRequest) Play(inp, out string, body []byte) {
 
 		streamer, format, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(f)))
 		if err != nil {
-			panic(err)
+			return
 		}
 		speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
 		done := make(chan bool)
