@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"main/packages/utils"
 	"net/http"
 	"net/url"
 	"os"
@@ -113,7 +112,7 @@ func Playlist(url string) (IDs []Youtube) {
 	req, _ := http.NewRequest("GET", url, nil)
 	rr, _ := http.DefaultClient.Do(req)
 	aa, _ := io.ReadAll(rr.Body)
-	var DD utils.YTPageConfig
+	var DD YTPageConfig
 	json.Unmarshal([]byte(strings.Split(strings.Split(string(aa), `var ytInitialData =`)[1], `;</script>`)[0]), &DD)
 	for _, data := range DD.Contents.TwoColumnBrowseResultsRenderer.Tabs {
 		for _, yt := range data.TabRenderer.Content.SectionListRenderer.Contents {
