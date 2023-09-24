@@ -257,7 +257,7 @@ func getTitle(Runs []struct {
 	return
 }
 
-func (YT YTRequest) GetStream(inp, out string, body []byte) (beep.StreamSeekCloser, beep.Format) {
+func (YT YTRequest) GetStream(inp, out string, body []byte) *beep.Buffer {
 	if ffmpeg, ok := checkFFM(); ok {
 		Write(body, inp).Close()
 		exec.Command(ffmpeg, "-y", "-loglevel", "quiet", "-i", inp, "-vn", out).Run()
@@ -267,17 +267,19 @@ func (YT YTRequest) GetStream(inp, out string, body []byte) (beep.StreamSeekClos
 		songbody := io.NopCloser(bytes.NewBuffer(f))
 		streamer, format, err := mp3.Decode(songbody)
 		if err != nil {
-			return nil, beep.Format{}
+			return nil
 		}
-		return streamer, format
+		buf := beep.NewBuffer(format)
+		buf.Append(streamer)
+		return buf
 	}
-	return nil, beep.Format{}
+	return nil
 }
 
-func (YT YTRequest) PlayWithStream(s beep.StreamSeekCloser, f beep.Format) {
-	speaker.Init(f.SampleRate, f.SampleRate.N(time.Second/10))
+func (YT YTRequest) PlayWithStream(s *beep.Buffer) {
+	speaker.Init(s.Format().SampleRate, s.Format().SampleRate.N(time.Second/10))
 	done := make(chan bool)
-	speaker.Play(beep.Seq(s, beep.Callback(func() {
+	speaker.Play(beep.Seq(s.Streamer(0, s.Len()), beep.Callback(func() {
 		done <- true
 	})))
 	<-done
@@ -285,16 +287,17 @@ func (YT YTRequest) PlayWithStream(s beep.StreamSeekCloser, f beep.Format) {
 	speaker.Close()
 }
 
-func (YT YTRequest) Play(inp, out string, body []byte) {
-	streamer, format := YT.GetStream(inp, out, body)
-	speaker.Init(format.SampleRate, format.SampleRate.N(time.Second/10))
+func (YT YTRequest) Play(inp, out string, body []byte) *beep.Buffer {
+	s := YT.GetStream(inp, out, body)
+	speaker.Init(s.Format().SampleRate, s.Format().SampleRate.N(time.Second/10))
 	done := make(chan bool)
-	speaker.Play(beep.Seq(streamer, beep.Callback(func() {
+	speaker.Play(beep.Seq(s.Streamer(0, s.Len()), beep.Callback(func() {
 		done <- true
 	})))
 	<-done
 	speaker.Clear()
 	speaker.Close()
+	return s
 }
 
 func checkFFM() (string, bool) {
