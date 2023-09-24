@@ -288,16 +288,18 @@ func (YT YTRequest) PlayWithStream(s *beep.Buffer) {
 }
 
 func (YT YTRequest) Play(inp, out string, body []byte) *beep.Buffer {
-	s := YT.GetStream(inp, out, body)
-	speaker.Init(s.Format().SampleRate, s.Format().SampleRate.N(time.Second/10))
-	done := make(chan bool)
-	speaker.Play(beep.Seq(s.Streamer(0, s.Len()), beep.Callback(func() {
-		done <- true
-	})))
-	<-done
-	speaker.Clear()
-	speaker.Close()
-	return s
+	if s := YT.GetStream(inp, out, body); s != nil {
+		speaker.Init(s.Format().SampleRate, s.Format().SampleRate.N(time.Second/10))
+		done := make(chan bool)
+		speaker.Play(beep.Seq(s.Streamer(0, s.Len()), beep.Callback(func() {
+			done <- true
+		})))
+		<-done
+		speaker.Clear()
+		speaker.Close()
+		return s
+	}
+	return nil
 }
 
 func checkFFM() (string, bool) {
