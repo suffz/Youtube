@@ -179,9 +179,12 @@ func (DL *Youtube) getReq(URL, SIG, CT string) YTRequest {
 	}
 	if SIG != "" {
 		if CL, Url, err := getSigUrlAndToken(SIG, DL.ID); err == nil {
+			if CT == "" {
+				CT = strconv.Itoa(CL)
+			}
 			return YTRequest{
 				VideoID:       DL.ID,
-				ContentLength: strconv.Itoa(CL),
+				ContentLength: CT,
 				URL:           Url,
 				Config:        *DL,
 				Sig:           true,
