@@ -284,7 +284,7 @@ func (DL *YTRequest) dlChunked(val int) []byte {
 		w.CloseWithError(err)
 		cancel()
 	}
-	chunks := getChunks(int64(val), Size175Kb)
+	chunks := getChunks(int64(val), Size1Mb)
 	var ctx = context.Background()
 	if req, err := http.NewRequestWithContext(ctx, "GET", DL.URL, nil); err == nil {
 		var wg sync.WaitGroup
