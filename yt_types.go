@@ -24,7 +24,14 @@ const (
 	Video144p   = "144p"
 	AudioMedium = "AUDIO_QUALITY_MEDIUM"
 	AudioLow    = "AUDIO_QUALITY_LOW"
+	Size1Kb     = 1024
+	Size175Kb   = Size1Kb * 175
+	Size500Kb   = Size1Kb * 500
+	Size1Mb     = Size1Kb * 1024
+	Size10Mb    = Size1Mb * 10
 )
+
+var ()
 
 type YTVids struct {
 	RBody io.ReadCloser
@@ -40,6 +47,11 @@ type YTRequest struct {
 	Config        Youtube
 }
 
+type Priority struct {
+	Top          bool
+	Options_Mime AdaptiveFormats
+}
+
 type Youtube struct {
 	ID           string
 	FullURL      string
@@ -49,6 +61,7 @@ type Youtube struct {
 	Info         string
 	Continuation string
 	MS           int
+	F            AdaptiveFormats
 }
 
 type YT struct {
