@@ -2,114 +2,179 @@ package Youtube
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
+	"github.com/google/uuid"
 )
 
-func Video(U Youtube, Video bool, Quality string) YTRequest {
+// Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
+// for example {420p, 1080p} 420 comes first so it finds that resolution.
+func Video(U Youtube, VideoQuality []string, AudioQuality string) YTRequest {
 	ID := U.ID
-	Body := fmt.Sprintf(`
-	{
-	  "context": {
-		"client": {
-		  "clientName": "WEB",
-		  "clientVersion": "2.20230615.02.01"
+	var playerResponsePattern = regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
+	if resp, err := http.Get("https://www.youtube.com/watch?v=" + ID + "&bpctr=9999999999&has_verified=1"); err == nil {
+		body, _ := io.ReadAll(resp.Body)
+		initialPlayerResponse := playerResponsePattern.FindSubmatch(body)
+		if initialPlayerResponse == nil || len(initialPlayerResponse) < 2 {
+			return YTRequest{}
 		}
-	  },
-	  "videoId": "%v"
-	}
-	`, ID)
-	req, _ := http.NewRequest("POST", "https://www.youtube.com/youtubei/v1/player?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8&prettyPrint=false", bytes.NewReader([]byte(Body)))
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Content-Length", strconv.Itoa(len(Body)))
-	resp, e := http.DefaultClient.Do(req)
-	if e == nil {
-		defer resp.Body.Close()
 		var getOpts YT
-		get_id, _ := io.ReadAll(resp.Body)
-		json.Unmarshal(get_id, &getOpts)
-
-		for _, T := range getOpts.StreamingData.AdaptiveFormats {
-			if Video {
-				if T.QualityLabel == Quality {
-					ms, _ := strconv.Atoi(T.ApproxDurationMs)
-					DL := Youtube{
-						ID:      ID,
-						FullURL: "https://www.youtube.com/watch?v=" + ID,
-						Title:   getOpts.VideoDetails.Title,
-						Length:  T.ContentLength,
-						Index:   getOpts.VideoDetails.ShortDescription,
-						MS:      ms,
+		json.Unmarshal(initialPlayerResponse[1], &getOpts)
+		var Options_Mime []Priority
+		var OMime Priority
+		var found_prio bool
+		if len(VideoQuality) != 0 {
+			for _, T := range getOpts.StreamingData.AdaptiveFormats {
+				if inside(T.QualityLabel, VideoQuality) {
+					if strings.Contains(T.QualityLabel, VideoQuality[0]) {
+						Options_Mime = append(Options_Mime, Priority{Top: true, Options_Mime: T})
+						continue
 					}
-
-					return DL.getReq(T.URL, T.Sig, T.ContentLength)
-				}
-			} else {
-				if T.AudioQuality == Quality {
-					ms, _ := strconv.Atoi(T.ApproxDurationMs)
-					DL := Youtube{
-						ID:      ID,
-						FullURL: "https://www.youtube.com/watch?v=" + ID,
-						Title:   getOpts.VideoDetails.Title,
-						Length:  T.ContentLength,
-						Index:   getOpts.VideoDetails.ShortDescription,
-						MS:      ms,
-					}
-
-					return DL.getReq(T.URL, T.Sig, T.ContentLength)
+					Options_Mime = append(Options_Mime, Priority{Options_Mime: T})
 				}
 			}
+			for _, t := range Options_Mime {
+				if t.Top {
+					OMime = t
+					found_prio = true
+					break
+				}
+			}
+			if found_prio && len(VideoQuality) != 0 && AudioQuality == "" {
+				return dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
+			}
 		}
-		for _, T := range getOpts.StreamingData.Formats {
-			if Video {
-				if T.QualityLabel == Quality {
-					ms, _ := strconv.Atoi(T.ApproxDurationMs)
-					DL := Youtube{
-						ID:      ID,
-						FullURL: "https://www.youtube.com/watch?v=" + ID,
-						Title:   getOpts.VideoDetails.Title,
-						Length:  resp.Header.Get("Content-Length"),
-						Index:   getOpts.VideoDetails.ShortDescription,
-						MS:      ms,
-					}
-
-					return DL.getReq(T.URL, T.Sig, resp.Header.Get("Content-Length"))
-				}
-			} else {
-				if T.AudioQuality == Quality {
-					ms, _ := strconv.Atoi(T.ApproxDurationMs)
-					DL := Youtube{
-						ID:      ID,
-						FullURL: "https://www.youtube.com/watch?v=" + ID,
-						Title:   getOpts.VideoDetails.Title,
-						Length:  resp.Header.Get("Content-Length"),
-						Index:   getOpts.VideoDetails.ShortDescription,
-						MS:      ms,
-					}
-
-					return DL.getReq(T.URL, T.Sig, resp.Header.Get("Content-Length"))
-				}
+		for _, T := range getOpts.StreamingData.AdaptiveFormats {
+			switch true {
+			case len(VideoQuality) != 0 && AudioQuality == "" && inside(T.QualityLabel, VideoQuality) && strings.Contains(T.MimeType, "mp4"):
+				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
+			case len(VideoQuality) == 0 && AudioQuality != "" && T.AudioQuality == AudioQuality:
+				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
 			}
 		}
 	}
 	return YTRequest{}
 }
 
+// Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
+// for example {420p, 1080p} 420 comes first so it finds that resolution.
+func VideoAndAudioDownload(url string, VideoQuality []string, AudioQuality string) (audio []byte, video []byte) {
+	var (
+		wg        sync.WaitGroup
+		audio_b   []byte
+		video_b   []byte
+		vid_audio = Video(Youtube{
+			ID:      YoutubeURL(url),
+			FullURL: url,
+		}, []string{}, AudioQuality)
+		vid_video = Video(Youtube{
+			ID:      YoutubeURL(url),
+			FullURL: url,
+		}, VideoQuality, "")
+	)
+
+	if vid_audio.Config.ID == "" || vid_video.Config.ID == "" {
+		return nil, nil
+	}
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		video_b, _ = vid_video.Download()
+	}()
+	go func() {
+		defer wg.Done()
+		audio_b, _ = vid_audio.Download()
+	}()
+
+	wg.Wait()
+
+	return audio_b, video_b
+}
+
+func FfmpegVideoAndAudio(audio []byte, video []byte, remove_when_complete bool) []byte {
+	path := strings.ReplaceAll(uuid.NewString(), "-", "")
+
+	a_f := "audio_f_" + path + ".mp4"
+	v_f := "video_f_" + path + ".mp4"
+
+	file, _ := os.Create(a_f)
+	file_, _ := os.Create(v_f)
+	file.Write(audio)
+	file_.Write(video)
+
+	file.Close()
+	file_.Close()
+
+	dest := "va_dest_" + path + ".mp4"
+
+	ffmpegVersionCmd := exec.Command("ffmpeg", "-y",
+		"-i", v_f,
+		"-i", a_f,
+		"-c", "copy",
+		"-shortest",
+		dest,
+		"-loglevel", "warning",
+	)
+
+	ffmpegVersionCmd.Run()
+	if body, err := os.ReadFile(dest); err == nil {
+		os.Remove(a_f)
+		os.Remove(v_f)
+		if remove_when_complete {
+			os.Remove(dest)
+		}
+		return body
+	}
+	return nil
+}
+
+func inside(q string, all []string) bool {
+	for _, a := range all {
+		if strings.Contains(a, q) {
+			return true
+		}
+	}
+	return false
+}
+
+func dlFormatDlInfo(ID string, getOpts YT, T AdaptiveFormats, header string) YTRequest {
+	ms, _ := strconv.Atoi(T.ApproxDurationMs)
+	DL := Youtube{
+		ID:      ID,
+		FullURL: "https://www.youtube.com/watch?v=" + ID,
+		Title:   getOpts.VideoDetails.Title,
+		Length:  T.ContentLength,
+		Index:   getOpts.VideoDetails.ShortDescription,
+		MS:      ms,
+		F:       T,
+	}
+	if T.ContentLength == "" || T.ContentLength == "0" {
+		T.ContentLength = header
+	}
+	return DL.getReq(T.URL, T.Sig, T.ContentLength)
+}
+
 func Playlist(url string) (IDs []Youtube) {
-	req, _ := http.NewRequest("GET", url, nil)
+	req, _ := http.NewRequestWithContext(context.Background(), "GET", url, nil)
 	rr, _ := http.DefaultClient.Do(req)
 	aa, _ := io.ReadAll(rr.Body)
 	var DD YTPageConfig
@@ -140,26 +205,155 @@ func Playlist(url string) (IDs []Youtube) {
 	return
 }
 
-func (DL *YTRequest) Download() ([]byte, time.Duration, error) {
-	st := time.Now()
-	ct, err := strconv.Atoi(DL.ContentLength)
+func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
+	ffmp, _ := checkFFM()
+	cmd := exec.Command(ffmp, "-y",
+		"-i", "pipe:0",
+		"-map_metadata", "-1",
+		"-c:a", "libmp3lame",
+		"-fps_mode", "2",
+		"-b:a", "128k",
+		"-f", "mp3",
+		"-vn", "pipe:1",
+	)
+
+	resultBuffer := bytes.NewBuffer(make([]byte, 5*1024*1024)) // pre allocate 5MiB buffer
+
+	cmd.Stderr = os.Stderr    // bind log stream to stderr
+	cmd.Stdout = resultBuffer // stdout result will be written here
+
+	stdin, err := cmd.StdinPipe() // Open stdin pipe
+	check(err)
+
+	err = cmd.Start() // Start a process on another goroutine
+	check(err)
+
+	_, err = stdin.Write(buf) // pump audio data to stdin pipe
+	check(err)
+
+	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
+	check(err)
+
+	err = cmd.Wait() // wait until ffmpeg finish
+	check(err)
+
+	streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes())))
+	check(err)
+
+	return streamer, f
+}
+func check(err error) {
 	if err != nil {
-		return []byte{}, 0, err
+		panic(err)
 	}
-	var Range string
-	if DL.Sig {
-		Range = fmt.Sprintf(`&range=0-%v`, ct)
+}
+func dlPeice(re *http.Request, ctx context.Context, start, end int) []byte {
+	q := re.URL.Query()
+	q.Set("range", fmt.Sprintf("%d-%d", start, end))
+	re.URL.RawQuery = q.Encode()
+	re.Header.Add("Accept", "*/*")
+	re.Header.Set("Origin", "https://youtube.com")
+	re.Header.Set("Sec-Fetch-Mode", "navigate")
+	re.Header.Set("X-Youtube-Client-Name", "3")
+	re.Header.Set("X-Youtube-Client-Version", "17.31.35")
+	re.Header.Set("User-Agent", "com.google.android.youtube/17.31.35 (Linux; U; Android 11) gzip")
+	re.AddCookie(&http.Cookie{
+		Name:   "CONSENT",
+		Value:  "YES+cb.20210328-17-p0.en+FX+" + strconv.Itoa(rand.Intn(899)+100),
+		Path:   "/",
+		Domain: ".youtube.com",
+	})
+	if r, err := http.DefaultClient.Do(re); err == nil {
+		data, _ := io.ReadAll(r.Body)
+		r.Body.Close()
+		return data
 	}
-	req, _ := http.NewRequest("GET", DL.URL+Range, nil)
-	req.Header.Add("Accept", "*/*")
-	req.Header.Add("Range", fmt.Sprintf(fmt.Sprintf("bytes=0-%v", ct)))
-	req.Header.Add("Referer", DL.URL)
+	return nil
+}
 
-	r, _ := http.DefaultClient.Do(req)
+func (DL *YTRequest) Download() ([]byte, time.Duration) {
+	st := time.Now()
+	val, _ := strconv.Atoi(DL.ContentLength)
+	return DL.dlChunked(val), time.Since(st)
+}
 
-	Vid, err := io.ReadAll(r.Body)
+func (DL *YTRequest) dlChunked(val int) []byte {
+	r, w := io.Pipe()
+	cancelCtx, cancel := context.WithCancel(context.TODO())
+	abort := func(err error) {
+		w.CloseWithError(err)
+		cancel()
+	}
+	chunks := getChunks(int64(val), Size175Kb)
+	var ctx = context.Background()
+	if req, err := http.NewRequestWithContext(ctx, "GET", DL.URL, nil); err == nil {
+		var wg sync.WaitGroup
+		for _, ch := range chunks {
+			wg.Add(1)
+			go func(chunk chunk) {
+				defer wg.Done()
+				data := dlPeice(req.Clone(ctx), ctx, int(chunk.start), int(chunk.end))
+				expected := int(chunk.end-chunk.start) + 1
+				n := len(data)
+				if n == expected {
+					chunk.data <- data
+				}
+				close(chunk.data)
+			}(ch)
+		}
+		go func() {
+			for i := 0; i < len(chunks); i++ {
+				select {
+				case <-cancelCtx.Done():
+					abort(context.Canceled)
+					return
+				case data := <-chunks[i].data:
+					_, err := io.Copy(w, bytes.NewBuffer(data))
+					if err != nil {
+						abort(err)
+					}
+				}
+			}
+			w.Close()
+		}()
+		wg.Wait()
+		var buf bytes.Buffer
+		mw := io.MultiWriter(&buf)
+		io.Copy(mw, r)
+		return buf.Bytes()
+	}
+	return nil
+}
 
-	return Vid, time.Since(st), err
+func getMaxRoutines(limit int) int {
+	routines := 10
+
+	if limit > 0 && routines > limit {
+		routines = limit
+	}
+
+	return routines
+}
+
+type chunk struct {
+	start int64
+	end   int64
+	data  chan []byte
+}
+
+func getChunks(totalSize, chunkSize int64) []chunk {
+	var chunks []chunk
+
+	for start := int64(0); start < totalSize; start += chunkSize {
+		end := chunkSize + start - 1
+		if end > totalSize-1 {
+			end = totalSize - 1
+		}
+
+		chunks = append(chunks, chunk{start, end, make(chan []byte, 1)})
+	}
+
+	return chunks
 }
 
 func ReturnJustString(data []byte, err error) string {
@@ -242,13 +436,14 @@ func getSigUrlAndToken(SIG, VideoID string) (int, string, error) {
 	if err != nil {
 		return 0, "", err
 	}
+
 	return ContentL, URL, err
 }
 
-func Write(Vid []byte, filename string) *os.File {
-	files, _ := os.OpenFile(filename, os.O_CREATE|os.O_TRUNC, 0644)
-	io.Copy(files, bytes.NewBuffer(Vid))
-	return files
+func Write(Vid []byte, filename string) {
+	file, _ := os.Create(filename)
+	file.Write(Vid)
+	file.Close()
 }
 
 func getTitle(Runs []struct {
@@ -262,22 +457,31 @@ func getTitle(Runs []struct {
 
 func (YT YTRequest) GetStream(inp, out string, body []byte) *beep.Buffer {
 	if ffmpeg, ok := checkFFM(); ok {
-		Write(body, inp).Close()
-		exec.Command(ffmpeg, "-y", "-loglevel", "quiet", "-i", inp, "-vn", out).Run()
+		Write(body, inp)
+
+		dmo := exec.Command(ffmpeg, "-y", "-loglevel", "quiet", "-i", inp, "-vn", out)
+		dmo.Run()
+
 		f, _ := os.ReadFile(out)
 		os.Remove(inp)
 		os.Remove(out)
+
 		songbody := io.NopCloser(bytes.NewBuffer(f))
+		defer songbody.Close()
 		streamer, format, err := mp3.Decode(songbody)
 		if err != nil {
 			return nil
 		}
+
 		buf := beep.NewBuffer(format)
 		buf.Append(streamer)
+
 		return buf
 	}
 	return nil
 }
+
+var PlayingRN bool
 
 func (YT YTRequest) PlayWithStream(s *beep.Buffer) {
 	speaker.Init(s.Format().SampleRate, s.Format().SampleRate.N(time.Second/10))
@@ -288,6 +492,7 @@ func (YT YTRequest) PlayWithStream(s *beep.Buffer) {
 	<-done
 	speaker.Clear()
 	speaker.Close()
+	PlayingRN = false
 }
 
 func (YT YTRequest) Play(inp, out string, body []byte) *beep.Buffer {
