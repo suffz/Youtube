@@ -223,6 +223,7 @@ func Playlist(url string) (IDs []Youtube) {
 	return
 }
 
+// This uses the mp4 []byte from Download() to return a usable mp3 []byte!
 func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 	ffmp, _ := checkFFM()
 	cmd := exec.Command(ffmp, "-y",
