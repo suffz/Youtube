@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/dop251/goja"
 )
@@ -45,6 +46,7 @@ type YTRequest struct {
 	VideoID       string
 	Sig           bool
 	Config        Youtube
+	Audio         Youtube
 }
 
 type Priority struct {
@@ -158,6 +160,10 @@ type DecipherOperation func([]byte) []byte
 var Y = regexp.MustCompile(`^.*(youtu.be\/|v\/|e\/|u\/\w+\/|embed\/|v=)([^#\&\?]*).*`)
 
 func YoutubeURL(URL string) string {
+	if strings.Contains(URL, "shorts") {
+		v := strings.Split(URL, "/")
+		return v[len(v)-1]
+	}
 	YT_ := Y.FindAllStringSubmatch(URL, -1)
 	if len(YT_) > 0 {
 		if len(YT_[0]) > 2 {
