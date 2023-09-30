@@ -24,16 +24,31 @@ import (
 	"github.com/google/uuid"
 )
 
+func VideoTitle(ID string) string {
+	var playerResponsePattern = regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
+	if resp, err := http.Get("https://www.youtube.com/watch?v=" + ID + "&bpctr=9999999999&has_verified=1"); err == nil {
+		body, _ := io.ReadAll(resp.Body)
+		initialPlayerResponse := playerResponsePattern.FindSubmatch(body)
+		if initialPlayerResponse == nil || len(initialPlayerResponse) < 2 {
+			return ""
+		}
+		var getOpts YT
+		json.Unmarshal(initialPlayerResponse[1], &getOpts)
+		return getOpts.VideoDetails.Title
+	}
+	return ""
+}
+
 // Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
 // for example {420p, 1080p} 420 comes first so it finds that resolution.
-func Video(U Youtube, VideoQuality []string, AudioQuality string) YTRequest {
+func Video(U Youtube, VideoQuality []string, AudioQuality string, VideoAndAudio bool) (audio YTRequest, video YTRequest) {
 	ID := U.ID
 	var playerResponsePattern = regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
 	if resp, err := http.Get("https://www.youtube.com/watch?v=" + ID + "&bpctr=9999999999&has_verified=1"); err == nil {
 		body, _ := io.ReadAll(resp.Body)
 		initialPlayerResponse := playerResponsePattern.FindSubmatch(body)
 		if initialPlayerResponse == nil || len(initialPlayerResponse) < 2 {
-			return YTRequest{}
+			return YTRequest{}, YTRequest{}
 		}
 		var getOpts YT
 		json.Unmarshal(initialPlayerResponse[1], &getOpts)
@@ -58,40 +73,43 @@ func Video(U Youtube, VideoQuality []string, AudioQuality string) YTRequest {
 				}
 			}
 			if found_prio && len(VideoQuality) != 0 && AudioQuality == "" {
-				return dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
+				return YTRequest{}, dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
+			} else if VideoAndAudio {
+				for _, T := range getOpts.StreamingData.AdaptiveFormats {
+					switch true {
+					case T.AudioQuality == AudioQuality:
+						return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length")), dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
+					}
+				}
 			}
 		}
 		for _, T := range getOpts.StreamingData.AdaptiveFormats {
 			switch true {
 			case len(VideoQuality) != 0 && AudioQuality == "" && inside(T.QualityLabel, VideoQuality) && strings.Contains(T.MimeType, "mp4"):
-				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
+				return YTRequest{}, dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
 			case len(VideoQuality) == 0 && AudioQuality != "" && T.AudioQuality == AudioQuality:
-				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
+				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length")), YTRequest{}
 			}
 		}
 	}
-	return YTRequest{}
+	return YTRequest{}, YTRequest{}
 }
 
 // Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
 // for example {420p, 1080p} 420 comes first so it finds that resolution.
-func VideoAndAudioDownload(url string, VideoQuality []string, AudioQuality string) (audio []byte, video []byte) {
+func VideoAndAudioDownload(ID string, VideoQuality []string, AudioQuality string) (audio []byte, video []byte, Info YTRequest) {
+
 	var (
-		wg        sync.WaitGroup
-		audio_b   []byte
-		video_b   []byte
-		vid_audio = Video(Youtube{
-			ID:      YoutubeURL(url),
-			FullURL: url,
-		}, []string{}, AudioQuality)
-		vid_video = Video(Youtube{
-			ID:      YoutubeURL(url),
-			FullURL: url,
-		}, VideoQuality, "")
+		wg                   sync.WaitGroup
+		audio_b              []byte
+		video_b              []byte
+		vid_audio, vid_video = Video(Youtube{
+			ID: ID,
+		}, VideoQuality, AudioQuality, true)
 	)
 
 	if vid_audio.Config.ID == "" || vid_video.Config.ID == "" {
-		return nil, nil
+		return nil, nil, YTRequest{}
 	}
 
 	wg.Add(2)
@@ -107,7 +125,7 @@ func VideoAndAudioDownload(url string, VideoQuality []string, AudioQuality strin
 
 	wg.Wait()
 
-	return audio_b, video_b
+	return audio_b, video_b, vid_audio
 }
 
 func FfmpegVideoAndAudio(audio []byte, video []byte, remove_when_complete bool) []byte {
