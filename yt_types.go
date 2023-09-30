@@ -46,7 +46,6 @@ type YTRequest struct {
 	VideoID       string
 	Sig           bool
 	Config        Youtube
-	Audio         Youtube
 }
 
 type Priority struct {
