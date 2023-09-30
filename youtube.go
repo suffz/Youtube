@@ -225,6 +225,7 @@ func Playlist(url string) (IDs []Youtube) {
 
 // This uses the mp4 []byte from Download() to return a usable mp3 []byte!
 func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
+
 	ffmp, _ := checkFFM()
 	cmd := exec.Command(ffmp, "-y",
 		"-i", "pipe:0",
@@ -237,9 +238,7 @@ func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 	)
 
 	resultBuffer := bytes.NewBuffer(make([]byte, 5*1024*1024)) // pre allocate 5MiB buffer
-
-	cmd.Stderr = os.Stderr    // bind log stream to stderr
-	cmd.Stdout = resultBuffer // stdout result will be written here
+	cmd.Stdout = resultBuffer                                  // stdout result will be written here
 
 	stdin, err := cmd.StdinPipe() // Open stdin pipe
 	check(err)
