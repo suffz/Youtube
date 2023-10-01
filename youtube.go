@@ -41,7 +41,7 @@ func VideoTitle(ID string) string {
 
 // Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
 // for example {420p, 1080p} 420 comes first so it finds that resolution.
-func Video(U Youtube, VideoQuality []string, AudioQuality string, VideoAndAudio bool) (audio YTRequest, video YTRequest) {
+func Video(U Youtube, VideoQuality []string, AudioQuality []string, VideoAndAudio bool) (audio YTRequest, video YTRequest) {
 	ID := U.ID
 	var playerResponsePattern = regexp.MustCompile(`var ytInitialPlayerResponse\s*=\s*(\{.+?\});`)
 	if resp, err := http.Get("https://www.youtube.com/watch?v=" + ID + "&bpctr=9999999999&has_verified=1"); err == nil {
@@ -72,32 +72,40 @@ func Video(U Youtube, VideoQuality []string, AudioQuality string, VideoAndAudio 
 					break
 				}
 			}
-			if found_prio && len(VideoQuality) != 0 && AudioQuality == "" {
+			if !found_prio {
+				OMime = Options_Mime[0]
+			}
+			switch true {
+			case found_prio && len(VideoQuality) != 0 && len(AudioQuality) == 0:
 				return YTRequest{}, dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
-			} else if VideoAndAudio {
+			case !found_prio && !VideoAndAudio:
+				return YTRequest{}, dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
+			case VideoAndAudio:
 				for _, T := range getOpts.StreamingData.AdaptiveFormats {
 					switch true {
-					case T.AudioQuality == AudioQuality:
+					case inside(T.AudioQuality, AudioQuality) && T.QualityLabel == "":
 						return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length")), dlFormatDlInfo(ID, getOpts, OMime.Options_Mime, resp.Header.Get("Content-Length"))
 					}
 				}
 			}
 		}
+
+		// Use Audio Only
+
 		for _, T := range getOpts.StreamingData.AdaptiveFormats {
 			switch true {
-			case len(VideoQuality) != 0 && AudioQuality == "" && inside(T.QualityLabel, VideoQuality) && strings.Contains(T.MimeType, "mp4"):
-				return YTRequest{}, dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length"))
-			case len(VideoQuality) == 0 && AudioQuality != "" && T.AudioQuality == AudioQuality:
+			case len(VideoQuality) == 0 && len(AudioQuality) != 0 && inside(T.AudioQuality, AudioQuality) && T.QualityLabel == "":
 				return dlFormatDlInfo(ID, getOpts, T, resp.Header.Get("Content-Length")), YTRequest{}
 			}
 		}
+
 	}
 	return YTRequest{}, YTRequest{}
 }
 
 // Video Quality doesnt download all of said videos from the quality chosen, it instead takes what ever is found and prioritizes it once found
 // for example {420p, 1080p} 420 comes first so it finds that resolution.
-func VideoAndAudioDownload(ID string, VideoQuality []string, AudioQuality string) (audio []byte, video []byte, Info YTRequest) {
+func VideoAndAudioDownload(ID string, VideoQuality []string, AudioQuality []string) (audio []byte, video []byte, Info YTRequest) {
 
 	var (
 		wg                   sync.WaitGroup
@@ -116,16 +124,24 @@ func VideoAndAudioDownload(ID string, VideoQuality []string, AudioQuality string
 
 	go func() {
 		defer wg.Done()
-		video_b, _ = vid_video.Download()
+		video_b = vid_video.Download()
 	}()
 	go func() {
 		defer wg.Done()
-		audio_b, _ = vid_audio.Download()
+		audio_b = vid_audio.Download()
 	}()
 
 	wg.Wait()
 
 	return audio_b, video_b, vid_audio
+}
+
+func AudioMust(audio YTRequest, video YTRequest) *YTRequest {
+	return &audio
+}
+
+func VideoMust(audio YTRequest, video YTRequest) *YTRequest {
+	return &video
 }
 
 func FfmpegVideoAndAudio(audio []byte, video []byte, remove_when_complete bool) []byte {
@@ -289,13 +305,13 @@ func dlPeice(re *http.Request, ctx context.Context, start, end int) []byte {
 	return nil
 }
 
-func (DL *YTRequest) Download() ([]byte, time.Duration) {
-	st := time.Now()
+func (DL *YTRequest) Download() []byte {
 	val, _ := strconv.Atoi(DL.ContentLength)
-	return DL.dlChunked(val), time.Since(st)
+	return DL.dlChunked(val)
 }
 
 func (DL *YTRequest) dlChunked(val int) []byte {
+
 	r, w := io.Pipe()
 	cancelCtx, cancel := context.WithCancel(context.TODO())
 	abort := func(err error) {
@@ -304,6 +320,7 @@ func (DL *YTRequest) dlChunked(val int) []byte {
 	}
 	chunks := getChunks(int64(val), Size1Mb)
 	var ctx = context.Background()
+
 	if req, err := http.NewRequestWithContext(ctx, "GET", DL.URL, nil); err == nil {
 		var wg sync.WaitGroup
 		for _, ch := range chunks {
