@@ -256,31 +256,19 @@ func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 	resultBuffer := bytes.NewBuffer(make([]byte, 5*1024*1024)) // pre allocate 5MiB buffer
 	cmd.Stdout = resultBuffer                                  // stdout result will be written here
 
-	stdin, err := cmd.StdinPipe() // Open stdin pipe
-	check(err)
+	stdin, _ := cmd.StdinPipe() // Open stdin pipe
+	cmd.Start()                 // Start a process on another goroutine
+	stdin.Write(buf)            // pump audio data to stdin pipe
+	stdin.Close()               // close the stdin, or ffmpeg will wait forever
+	cmd.Wait()                  // wait until ffmpeg finish
 
-	err = cmd.Start() // Start a process on another goroutine
-	check(err)
-
-	_, err = stdin.Write(buf) // pump audio data to stdin pipe
-	check(err)
-
-	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
-	check(err)
-
-	err = cmd.Wait() // wait until ffmpeg finish
-	check(err)
-
-	streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes())))
-	check(err)
-
-	return streamer, f
-}
-func check(err error) {
-	if err != nil {
-		panic(err)
+	if streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes()))); err == nil {
+		return streamer, f
 	}
+
+	return nil, beep.Format{}
 }
+
 func dlPeice(re *http.Request, ctx context.Context, start, end int) []byte {
 	q := re.URL.Query()
 	q.Set("range", fmt.Sprintf("%d-%d", start, end))
