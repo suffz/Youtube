@@ -546,11 +546,17 @@ func (YT YTRequest) Play(inp, out string, body []byte) *beep.Buffer {
 }
 
 func checkFFM() (string, bool) {
+
+	if commandExists("ffmpeg") {
+		return "ffmpeg", true
+	}
+
 	ffmpeg, err := exec.LookPath("ffmpeg")
+
 	if err != nil {
 		if runtime.GOOS == "windows" {
 			if err := exec.Command("winget", "install", "ffmpeg").Run(); err != nil {
-				return ffmpeg, false
+				return checkFFM()
 			} else {
 				ffmpeg, _ = exec.LookPath("ffmpeg")
 			}
@@ -559,3 +565,9 @@ func checkFFM() (string, bool) {
 	}
 	return ffmpeg, true
 }
+
+func commandExists(cmd string) bool {
+	_, err := exec.LookPath(cmd)
+	return err == nil
+}
+
