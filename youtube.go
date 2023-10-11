@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/faiface/beep"
@@ -169,6 +170,8 @@ func FfmpegVideoAndAudio(audio []byte, video []byte, remove_when_complete bool) 
 		"-loglevel", "warning",
 	)
 
+	ffmpegVersionCmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
 	ffmpegVersionCmd.Run()
 	if body, err := os.ReadFile(dest); err == nil {
 		os.Remove(a_f)
@@ -253,22 +256,36 @@ func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 		"-vn", "pipe:1",
 	)
 
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
 	resultBuffer := bytes.NewBuffer(make([]byte, 5*1024*1024)) // pre allocate 5MiB buffer
 	cmd.Stdout = resultBuffer                                  // stdout result will be written here
 
-	stdin, _ := cmd.StdinPipe() // Open stdin pipe
-	cmd.Start()                 // Start a process on another goroutine
-	stdin.Write(buf)            // pump audio data to stdin pipe
-	stdin.Close()               // close the stdin, or ffmpeg will wait forever
-	cmd.Wait()                  // wait until ffmpeg finish
+	stdin, err := cmd.StdinPipe() // Open stdin pipe
+	check(err)
 
-	if streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes()))); err == nil {
-		return streamer, f
-	}
+	err = cmd.Start() // Start a process on another goroutine
+	check(err)
 
-	return nil, beep.Format{}
+	_, err = stdin.Write(buf) // pump audio data to stdin pipe
+	check(err)
+
+	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
+	check(err)
+
+	err = cmd.Wait() // wait until ffmpeg finish
+	check(err)
+
+	streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes())))
+	check(err)
+
+	return streamer, f
 }
-
+func check(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
 func dlPeice(re *http.Request, ctx context.Context, start, end int) []byte {
 	q := re.URL.Query()
 	q.Set("range", fmt.Sprintf("%d-%d", start, end))
@@ -483,6 +500,7 @@ func (YT YTRequest) GetStream(inp, out string, body []byte) *beep.Buffer {
 		Write(body, inp)
 
 		dmo := exec.Command(ffmpeg, "-y", "-loglevel", "quiet", "-i", inp, "-vn", out)
+		dmo.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		dmo.Run()
 
 		f, _ := os.ReadFile(out)
@@ -558,4 +576,3 @@ func commandExists(cmd string) bool {
 	_, err := exec.LookPath(cmd)
 	return err == nil
 }
-
