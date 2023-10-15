@@ -273,8 +273,7 @@ func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
 	check(err)
 
-	err = cmd.Wait() // wait until ffmpeg finish
-	check(err)
+	cmd.Wait() // wait until ffmpeg finish
 
 	streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes())))
 	check(err)
