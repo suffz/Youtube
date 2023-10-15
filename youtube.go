@@ -262,28 +262,36 @@ func Ffmpeg(buf []byte) (beep.StreamSeekCloser, beep.Format) {
 	cmd.Stdout = resultBuffer                                  // stdout result will be written here
 
 	stdin, err := cmd.StdinPipe() // Open stdin pipe
-	check(err)
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
 	err = cmd.Start() // Start a process on another goroutine
-	check(err)
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
 	_, err = stdin.Write(buf) // pump audio data to stdin pipe
-	check(err)
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
 	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
-	check(err)
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
-	cmd.Wait() // wait until ffmpeg finish
+	err = cmd.Wait() // wait until ffmpeg finish
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
 	streamer, f, err := mp3.Decode(io.NopCloser(bytes.NewBuffer(resultBuffer.Bytes())))
-	check(err)
+	if err != nil {
+		return nil, beep.Format{}
+	}
 
 	return streamer, f
-}
-func check(err error) {
-	if err != nil {
-		panic(err)
-	}
 }
 func dlPeice(re *http.Request, ctx context.Context, start, end int) []byte {
 	q := re.URL.Query()
