@@ -32,7 +32,16 @@ const (
 	Size10Mb    = Size1Mb * 10
 )
 
-var ()
+var (
+	DefaultAudio = []string{AudioLow, AudioMedium}
+	DefaultVideo = []string{
+		Video720p,
+		Video1080p,
+		Video480p,
+		Video360p,
+		Video240p,
+	}
+)
 
 type YTVids struct {
 	RBody io.ReadCloser
