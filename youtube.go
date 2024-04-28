@@ -184,6 +184,51 @@ func FfmpegVideoAndAudio(audio []byte, video []byte, remove_when_complete bool) 
 	return nil
 }
 
+func FfmpegAudioToMp3(buf []byte) []byte {
+	ffmp, _ := checkFFM()
+	cmd := exec.Command(ffmp, "-y",
+		"-i", "pipe:0",
+		"-map_metadata", "-1",
+		"-c:a", "libmp3lame",
+		"-fps_mode", "2",
+		"-b:a", "128k",
+		"-f", "mp3",
+		"-vn", "pipe:1",
+	)
+
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+
+	resultBuffer := bytes.NewBuffer(make([]byte, 5*1024*1024)) // pre allocate 5MiB buffer
+	cmd.Stdout = resultBuffer                                  // stdout result will be written here
+
+	stdin, err := cmd.StdinPipe() // Open stdin pipe
+	if err != nil {
+		return nil
+	}
+
+	err = cmd.Start() // Start a process on another goroutine
+	if err != nil {
+		return nil
+	}
+
+	_, err = stdin.Write(buf) // pump audio data to stdin pipe
+	if err != nil {
+		return nil
+	}
+
+	err = stdin.Close() // close the stdin, or ffmpeg will wait forever
+	if err != nil {
+		return nil
+	}
+
+	err = cmd.Wait() // wait until ffmpeg finish
+	if err != nil {
+		return nil
+	}
+
+	return resultBuffer.Bytes()
+}
+
 func inside(q string, all []string) bool {
 	for _, a := range all {
 		if strings.Contains(a, q) {
